@@ -3,3 +3,4 @@ export * from './templates/index';
 export * from './utils/moduleDetector';
 export * from './utils/logicAnalyzer';
 export * from './utils/scoreCalculator';
+export * from './utils/severity';

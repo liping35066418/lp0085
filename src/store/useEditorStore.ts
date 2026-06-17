@@ -7,6 +7,7 @@ import type {
   LogicGap,
   EvidenceIssue,
   Suggestion,
+  Severity,
 } from '../../shared/types';
 
 const DEFAULT_TEXT = `1. 引言
@@ -26,17 +27,21 @@ const DEFAULT_TEXT = `1. 引言
 综上所述，本研究取得了一定的成果。未来还需要进一步深入研究。
 `;
 
+type SeverityFilter = Severity | 'all';
+
 interface EditorState {
   text: string;
   template: TemplateType;
   analysisResult: AnalyzeResponse | null;
   isAnalyzing: boolean;
   selectedIssueId: string | null;
+  selectedSeverity: SeverityFilter;
   setText: (text: string) => void;
   setTemplate: (template: TemplateType) => void;
   setAnalysisResult: (result: AnalyzeResponse | null) => void;
   setIsAnalyzing: (isAnalyzing: boolean) => void;
   setSelectedIssueId: (id: string | null) => void;
+  setSelectedSeverity: (severity: SeverityFilter) => void;
   clearAll: () => void;
 }
 
@@ -54,11 +59,13 @@ export const useEditorStore = create<EditorState>((set) => ({
   analysisResult: null,
   isAnalyzing: false,
   selectedIssueId: null,
+  selectedSeverity: 'all',
   setText: (text) => set({ text }),
   setTemplate: (template) => set({ template }),
   setAnalysisResult: (analysisResult) => set({ analysisResult }),
   setIsAnalyzing: (isAnalyzing) => set({ isAnalyzing }),
   setSelectedIssueId: (selectedIssueId) => set({ selectedIssueId }),
+  setSelectedSeverity: (selectedSeverity) => set({ selectedSeverity }),
   clearAll: () => set({ text: '', analysisResult: null }),
 }));
 

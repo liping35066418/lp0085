@@ -1,6 +1,7 @@
 import { useRef, useEffect, useMemo, useState } from 'react';
 import { useEditorStore } from '../../store/useEditorStore';
-import type { ModuleType, LogicGap, EvidenceIssue } from '../../../shared/types';
+import { getIssueSeverity, filterIssuesBySeverity } from '../../../shared/utils/severity';
+import type { ModuleType, LogicGap, EvidenceIssue, Severity } from '../../../shared/types';
 
 const MODULE_COLORS: Record<ModuleType, string> = {
   introduction: 'rgba(139, 127, 212, 0.12)',
@@ -16,6 +17,12 @@ const MODULE_BORDER: Record<ModuleType, string> = {
   conclusion: '#e76f8d',
 };
 
+const ISSUE_UNDERLINE_COLORS: Record<Severity, string> = {
+  high: '#f87171',
+  medium: '#fbbf24',
+  low: '#34d399',
+};
+
 interface HoverInfo {
   type: 'gap' | 'evidence';
   description: string;
@@ -25,8 +32,15 @@ interface HoverInfo {
 }
 
 export const TextEditor = () => {
-  const { text, setText, analysisResult, selectedIssueId, setSelectedIssueId, isAnalyzing } =
-    useEditorStore();
+  const {
+    text,
+    setText,
+    analysisResult,
+    selectedIssueId,
+    setSelectedIssueId,
+    selectedSeverity,
+    isAnalyzing,
+  } = useEditorStore();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
@@ -35,8 +49,17 @@ export const TextEditor = () => {
   const lineCount = useMemo(() => Math.max(1, text.split('\n').length), [text]);
 
   const modules = analysisResult?.modules ?? [];
-  const logicGaps = analysisResult?.logicGaps ?? [];
-  const evidenceIssues = analysisResult?.evidenceIssues ?? [];
+  const allLogicGaps = analysisResult?.logicGaps ?? [];
+  const allEvidenceIssues = analysisResult?.evidenceIssues ?? [];
+
+  const filteredLogicGaps = useMemo(
+    () => filterIssuesBySeverity(allLogicGaps, selectedSeverity),
+    [allLogicGaps, selectedSeverity],
+  );
+  const filteredEvidenceIssues = useMemo(
+    () => filterIssuesBySeverity(allEvidenceIssues, selectedSeverity),
+    [allEvidenceIssues, selectedSeverity],
+  );
 
   const handleScroll = () => {
     if (textareaRef.current && highlightRef.current && lineNumbersRef.current) {
@@ -53,13 +76,15 @@ export const TextEditor = () => {
   const renderHighlightedText = () => {
     if (!text) return null;
 
-    const segments: Array<{
+    type Segment = {
       text: string;
       bgColor: string;
       borderColor?: string;
-      isGap?: boolean;
-      isIssue?: EvidenceIssue;
-    }> = [];
+      underlineColor?: string;
+      underlineStyle?: 'wavy' | 'solid';
+    };
+
+    const segments: Segment[] = [];
 
     const validModules = modules.filter((m) => m.startIndex >= 0);
     if (validModules.length === 0) {
@@ -82,6 +107,89 @@ export const TextEditor = () => {
       }
     }
 
+    const allIssues: Array<{ startIndex: number; endIndex: number; severity: Severity }> = [
+      ...filteredLogicGaps.map((g) => ({
+        startIndex: g.startIndex,
+        endIndex: g.endIndex,
+        severity: g.severity,
+      })),
+      ...filteredEvidenceIssues.map((e) => ({
+        startIndex: e.startIndex,
+        endIndex: e.endIndex,
+        severity: getIssueSeverity(e),
+      })),
+    ].sort((a, b) => a.startIndex - b.startIndex);
+
+    if (allIssues.length > 0) {
+      const newSegments: Segment[] = [];
+      let segOffset = 0;
+
+      segments.forEach((seg) => {
+        const segStart = segOffset;
+        const segEnd = segOffset + seg.text.length;
+        segOffset = segEnd;
+
+        const overlappingIssues = allIssues.filter(
+          (issue) => issue.startIndex < segEnd && issue.endIndex > segStart,
+        );
+
+        if (overlappingIssues.length === 0) {
+          newSegments.push(seg);
+          return;
+        }
+
+        let cursor = segStart;
+        overlappingIssues.forEach((issue) => {
+          const issueStart = Math.max(issue.startIndex, segStart);
+          const issueEnd = Math.min(issue.endIndex, segEnd);
+
+          if (issueStart > cursor) {
+            newSegments.push({
+              text: text.slice(cursor, issueStart),
+              bgColor: seg.bgColor,
+              borderColor: cursor === segStart ? seg.borderColor : undefined,
+            });
+          }
+
+          if (issueEnd > issueStart) {
+            newSegments.push({
+              text: text.slice(issueStart, issueEnd),
+              bgColor: seg.bgColor,
+              underlineColor: ISSUE_UNDERLINE_COLORS[issue.severity],
+              underlineStyle: 'wavy',
+            });
+          }
+
+          cursor = issueEnd;
+        });
+
+        if (cursor < segEnd) {
+          newSegments.push({
+            text: text.slice(cursor, segEnd),
+            bgColor: seg.bgColor,
+          });
+        }
+      });
+
+      return newSegments.map((seg, i) => (
+        <span
+          key={i}
+          style={{
+            backgroundColor: seg.bgColor,
+            borderLeft: seg.borderColor ? `3px solid ${seg.borderColor}` : 'none',
+            paddingLeft: seg.borderColor ? '4px' : '0',
+            textDecoration: seg.underlineColor
+              ? `${seg.underlineStyle || 'wavy'} underline ${seg.underlineColor}`
+              : 'none',
+            textDecorationSkipInk: 'none',
+            textUnderlineOffset: '3px',
+          }}
+        >
+          {seg.text}
+        </span>
+      ));
+    }
+
     return segments.map((seg, i) => (
       <span
         key={i}
@@ -98,8 +206,8 @@ export const TextEditor = () => {
 
   useEffect(() => {
     if (selectedIssueId && textareaRef.current) {
-      const gap = logicGaps.find((g) => g.id === selectedIssueId);
-      const issue = evidenceIssues.find((e) => e.id === selectedIssueId);
+      const gap = allLogicGaps.find((g) => g.id === selectedIssueId);
+      const issue = allEvidenceIssues.find((e) => e.id === selectedIssueId);
       const target = gap ?? issue;
       if (target) {
         textareaRef.current.focus();
@@ -109,7 +217,7 @@ export const TextEditor = () => {
         textareaRef.current.scrollTop = (lines - 1) * lineHeight - 60;
       }
     }
-  }, [selectedIssueId, logicGaps, evidenceIssues, text]);
+  }, [selectedIssueId, allLogicGaps, allEvidenceIssues, text]);
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!textareaRef.current) return;
@@ -123,10 +231,10 @@ export const TextEditor = () => {
       e.clientY - rect.top,
     );
 
-    const gap = logicGaps.find(
+    const gap = filteredLogicGaps.find(
       (g) => charIndex >= g.startIndex - 2 && charIndex <= g.endIndex + 5,
     );
-    const issue = evidenceIssues.find(
+    const issue = filteredEvidenceIssues.find(
       (ev) => charIndex >= ev.startIndex && charIndex <= ev.endIndex,
     );
 
@@ -158,10 +266,7 @@ export const TextEditor = () => {
         style={{ fontFamily: 'JetBrains Mono, monospace' }}
       >
         {Array.from({ length: lineCount }, (_, i) => (
-          <div
-            key={i}
-            className="text-xs text-gray-600 leading-7 h-7"
-          >
+          <div key={i} className="text-xs text-gray-600 leading-7 h-7">
             {i + 1}
           </div>
         ))}
